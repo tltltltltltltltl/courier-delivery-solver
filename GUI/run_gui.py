@@ -72,9 +72,11 @@ problem_para_value_type_list = []
 problem_para_value_name_list = []
 
 llm_para_entry_list = []
-llm_para_value_name_list = ['name', 'host', 'key', 'model']
-llm_para_default_value_list = ['HttpsApi', '', '', '']
-llm_para_placeholder_list = ['HttpsApi', 'api.example.com', 'your-api-key', 'gpt-4o-mini']
+llm_para_value_name_list = ['name', 'host', 'key', 'model', 'timeout', 'reasoning_effort']
+llm_para_value_type_list = [str, str, str, str, int, str]
+llm_para_default_value_list = ['HttpsApi', '', '', '', 800, 'medium']
+llm_para_placeholder_list = ['HttpsApi', 'api.example.com', 'your-api-key', 'gpt-4o-mini', '800', 'medium']
+llm_para_choices = {'reasoning_effort': ['low', 'medium', 'high', 'max']}
 
 default_method = 'eoh'
 default_problem = ['courier_bundle_assignment']
@@ -192,6 +194,10 @@ def open_folder():
 
 
 def _set_entry_value(entry, value):
+    if isinstance(entry, tkttk.Combobox):
+        entry.set(str(value))
+        entry.have_content = True
+        return
     entry.delete(0, 'end')
     if value:
         entry.configure(foreground=entry.default_fg_color)
@@ -199,6 +205,13 @@ def _set_entry_value(entry, value):
         entry.have_content = True
     else:
         entry._add_placeholder(force=True)
+
+
+def _get_widget_value(widget):
+    value = widget.get()
+    if isinstance(widget, PlaceholderEntry):
+        return value if widget.have_content else ""
+    return value
 
 
 def load_llm_settings():
@@ -217,7 +230,7 @@ def apply_llm_settings():
     for index, name in enumerate(llm_para_value_name_list):
         value = settings.get(name)
         if value is None or value == "":
-            value = llm_para_default_value_list[index] if index == 0 else ""
+            value = llm_para_default_value_list[index]
         _set_entry_value(llm_para_entry_list[index], value)
 
 
@@ -226,12 +239,19 @@ def save_llm_settings():
         return
     data = {}
     for index, name in enumerate(llm_para_value_name_list):
-        entry = llm_para_entry_list[index]
-        data[name] = entry.get() if entry.have_content else ""
+        data[name] = _get_widget_value(llm_para_entry_list[index])
     if not data.get("name"):
         data["name"] = "HttpsApi"
     with LLM_SETTINGS_PATH.open('w', encoding='utf-8') as file:
         json.dump(data, file, ensure_ascii=False, indent=2)
+
+
+def _redact_sensitive_values(data):
+    redacted = dict(data)
+    key = redacted.get('key')
+    if key:
+        redacted['key'] = f'{key[:5]}...{key[-4:]}' if len(key) > 9 else '***'
+    return redacted
 
 
 ##########################################################
@@ -432,7 +452,7 @@ def on_plot_button_click():
 
 def check_para():
     for i in llm_para_entry_list[1:]:
-        if not i.have_content:
+        if not _get_widget_value(i):
             return False
     return True
 
@@ -446,7 +466,11 @@ def return_para():
     ####################
 
     for i in range(len(llm_para_entry_list)):
-        llm_para[llm_para_value_name_list[i]] = llm_para_entry_list[i].get()
+        llm_para[llm_para_value_name_list[i]] = _get_widget_value(llm_para_entry_list[i])
+        if llm_para_value_type_list[i] is int:
+            llm_para[llm_para_value_name_list[i]] = int(_get_widget_value(llm_para_entry_list[i]))
+    if llm_para.get('reasoning_effort') not in {'low', 'medium', 'high', 'max'}:
+        raise ValueError("reasoning_effort must be one of: low, medium, high, max")
 
     for i in range(len(method_para_entry_list)):
         method_para[method_para_value_name_list[i]] = method_para_entry_list[i].get()
@@ -476,7 +500,7 @@ def return_para():
 
     ####################
 
-    print(llm_para)
+    print(_redact_sensitive_values(llm_para))
     print(method_para)
     print(problem_para)
     print(profiler_para)
@@ -705,29 +729,26 @@ def terminate_search_process():
     global process1
 
     if process1 is None or not process1.is_alive():
+        process1 = None
         return
 
     if hasattr(os, "killpg"):
         try:
             process_group_id = os.getpgid(process1.pid)
             if process_group_id != os.getpgrp():
-                os.killpg(process_group_id, signal.SIGTERM)
-                process1.join(timeout=2)
-                if process1.is_alive():
-                    os.killpg(process_group_id, signal.SIGKILL)
-                    process1.join(timeout=2)
+                os.killpg(process_group_id, signal.SIGKILL)
+                process1.join(timeout=5)
+                process1 = None
                 return
         except (ProcessLookupError, PermissionError, OSError):
             pass
 
     try:
-        process1.terminate()
-        process1.join(timeout=2)
-        if process1.is_alive():
-            process1.kill()
-            process1.join(timeout=2)
+        process1.kill()
+        process1.join(timeout=5)
     except:
         pass
+    process1 = None
 
 
 def stop_run():
@@ -804,7 +825,19 @@ if __name__ == '__main__':
     llm_frame.pack(anchor=tk.NW, fill=tk.X, padx=5, pady=5)
 
     for i in range(len(llm_para_value_name_list)):
-        llm_para_entry_list.append(PlaceholderEntry(llm_frame, width=70, bootstyle="dark", placeholder=llm_para_placeholder_list[i]))
+        para_name = llm_para_value_name_list[i]
+        if para_name in llm_para_choices:
+            widget = ttk.Combobox(
+                llm_frame,
+                width=68,
+                bootstyle="dark",
+                values=llm_para_choices[para_name],
+                state='readonly'
+            )
+            widget.have_content = True
+        else:
+            widget = PlaceholderEntry(llm_frame, width=70, bootstyle="dark", placeholder=llm_para_placeholder_list[i])
+        llm_para_entry_list.append(widget)
         if i != 0:
             ttk.Label(llm_frame, text=llm_para_value_name_list[i] + ':').grid(row=i - 1, column=0, sticky='ns', padx=5, pady=5)
             llm_para_entry_list[-1].grid(row=i - 1, column=1, sticky='ns', padx=5, pady=5)

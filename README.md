@@ -68,7 +68,7 @@ GUI 中的默认配置已经指向：
 6. 右侧会显示当前最优 objective 曲线和当前最优 `solve()` 代码
 7. 运行日志会写入 `GUI/logs/`
 
-LLM 配置会保存到本地 `GUI/.llm_settings.json`，下次打开 GUI 时自动恢复。该文件已加入 `.gitignore`，不会把 API key 提交到公开仓库。顶部工具栏只保留项目 GitHub 地址入口。
+LLM 配置会保存到本地 `GUI/.llm_settings.json`，下次打开 GUI 时自动恢复。该文件已加入 `.gitignore`，不会把 API key 提交到公开仓库。
 
 ## EoH 方法原理说明
 
