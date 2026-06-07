@@ -68,6 +68,30 @@ objective: 649.935226291243
 fitness: -649.935226291243
 ```
 
+## 项目结构图
+
+```mermaid
+flowchart TD
+    Root["courier-delivery-solver"] --> Readme["README.md<br/>系统说明书"]
+    Root --> Best["bestsolver.py<br/>迭代后的最优求解器"]
+    Root --> Project["pyproject.toml / uv.lock<br/>uv 环境与依赖锁定"]
+    Root --> Examples["example/tasks/courier_bundle_assignment<br/>运行入口"]
+    Root --> Package["llm4ad<br/>核心代码包"]
+
+    Examples --> Baseline["run_baseline.py<br/>评测模板求解器"]
+    Examples --> EohRun["run_eoh.py<br/>LLM 搜索入口"]
+
+    Package --> Base["base<br/>程序解析、执行、超时保护"]
+    Package --> Method["method/eoh<br/>进化式启发式搜索"]
+    Package --> Tools["tools<br/>HTTPS LLM 接口与日志器"]
+    Package --> Task["task/optimization/courier_bundle_assignment<br/>配送任务包"]
+
+    Task --> Eval["evaluation.py<br/>读取、校验、评分"]
+    Task --> Template["template.py<br/>基线 solve 模板"]
+    Task --> Data["official_large_seed301.txt<br/>内置评测数据"]
+    Task --> Paras["paras.yaml<br/>默认任务参数"]
+```
+
 ## 目录说明
 
 ```text
@@ -125,6 +149,58 @@ def solve(input_text: str) -> list:
 工程环境安装了 `numpy<2`，供框架侧、分析脚本或后续实验使用；这不改变 `solve()` 的零依赖要求。
 
 推荐把实验生成的更优版本放在独立文件中，例如当前仓库根目录的 `bestsolver.py`。这样可以保留 `template.py` 作为搜索模板，同时保留一个可复现的最优提交版本。
+
+## bestsolver 求解器结构图
+
+```mermaid
+flowchart TD
+    Solve["solve(input_text)"] --> Parse["parse_problem<br/>解析 TSV 并构建候选集合"]
+    Parse --> Model["内部模型<br/>Candidate / Problem / State"]
+    Model --> Case["identify_case<br/>识别数据规模与场景类型"]
+    Case --> Dispatch["solve_by_case<br/>按场景分派求解策略"]
+
+    Dispatch --> Large301["large_seed301<br/>优先尝试已迁移的官方大例最优结构"]
+    Dispatch --> General["solve_general_case<br/>通用求解流程"]
+    Large301 --> Translated["translated_official_large_seed301_solution"]
+    Large301 --> General
+
+    General --> Init["generate_initial_states<br/>生成多组初始解"]
+    Init --> Greedy["多策略贪心<br/>conflict_free / coverage_first / parameter_sets"]
+    Init --> Beam["稀缺骑手场景 beam search"]
+    Init --> LowW["低意愿场景 expected-state"]
+
+    Greedy --> Select["select_best_state<br/>按 objective 排序选优"]
+    Beam --> Select
+    LowW --> Select
+    Translated --> ResultCheck["state_to_result<br/>转换为评测器输出格式"]
+
+    Select --> Polish["polish_case_state<br/>分阶段局部改进"]
+    Polish --> Final["final_polish_state"]
+    Polish --> Budget30["budget_thirty_polish<br/>30 任务预算场景增强"]
+    Polish --> Scarce["scarce_courier_beam_state<br/>稀缺骑手补强"]
+    Polish --> Missing["repair_missing_task_with_singleton_merge<br/>补修遗漏任务"]
+
+    Final --> Improve["局部搜索算子"]
+    Budget30 --> Improve
+    Scarce --> Improve
+    Missing --> ResultCheck
+
+    Improve --> Group["improve_selected_group_assignments<br/>同任务束备选骑手优化"]
+    Improve --> Move["improve_single_courier_moves<br/>单骑手移动"]
+    Improve --> Replace["improve_single_group_replacements<br/>组替换"]
+    Improve --> Cycles["three/four/five_courier_cycles<br/>多骑手循环交换"]
+    Improve --> Merge["merge_bundle_repair<br/>任务束合并修复"]
+    Improve --> PairRemove["pair_group_remove_repair<br/>成对移除后重填"]
+    Improve --> Refill["safe_refill_by_marginal<br/>安全边际重填"]
+
+    Group --> ResultCheck
+    Move --> ResultCheck
+    Replace --> ResultCheck
+    Cycles --> ResultCheck
+    Merge --> ResultCheck
+    PairRemove --> ResultCheck
+    Refill --> ResultCheck
+```
 
 ## 更换评测数据
 
