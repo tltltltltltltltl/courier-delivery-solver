@@ -29,7 +29,6 @@ ROOT_DIR = GUI_DIR.parent
 LLM_SETTINGS_PATH = GUI_DIR / ".llm_settings.json"
 sys.path.insert(0, str(ROOT_DIR))
 
-import time
 from datetime import datetime
 import pytz
 import tkinter as tk
@@ -42,7 +41,6 @@ import json
 import webbrowser
 import multiprocessing
 from llm4ad.gui import main_gui
-import threading
 import ttkbootstrap as ttk
 import subprocess
 import yaml
@@ -53,10 +51,13 @@ selected_algo = None
 selected_problem = None
 
 process1 = None
-thread1 = None
+PROCESS_CONTEXT = multiprocessing.get_context("spawn")
 
 stop_thread = False
 have_stop_thread = False
+result_index = 1
+result_max_sample_nums = 0
+result_poll_after_id = None
 
 method_para_entry_list = []
 method_para_value_type_list = []
@@ -383,8 +384,10 @@ def problem_type_select(event=None):
 
 def on_plot_button_click():
     global process1
-    global thread1
     global log_dir
+    global result_index
+    global result_max_sample_nums
+    global result_poll_after_id
 
     try:
 
@@ -397,13 +400,14 @@ def on_plot_button_click():
 
         init_fig(method_para['max_sample_nums'])
 
-        process1 = multiprocessing.Process(target=main_gui, args=(llm_para, method_para, problem_para, profiler_para))
+        log_dir = profiler_para['log_dir']
+        result_index = 1
+        result_max_sample_nums = method_para['max_sample_nums']
+
+        process1 = PROCESS_CONTEXT.Process(target=main_gui, args=(llm_para, method_para, problem_para, profiler_para))
         process1.start()
 
-        thread1 = threading.Thread(target=get_results, args=(profiler_para['log_dir'], method_para['max_sample_nums'],), daemon=True)
-        thread1.start()
-
-        log_dir = profiler_para['log_dir']
+        result_poll_after_id = root.after(500, poll_results)
 
         plot_button['state'] = tk.DISABLED
         stop_button['state'] = tk.NORMAL
@@ -472,7 +476,6 @@ def return_para():
 def init_fig(max_sample_nums):
     global stop_thread
     global have_stop_thread
-    global thread1
     global process1
     global ax
     global figures
@@ -524,37 +527,47 @@ def init_fig(max_sample_nums):
     canvas = FigureCanvasTkAgg(figures, master=plot_frame)
     canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-def get_results(log_dir, max_sample_nums):
+def poll_results():
     global figures
     global stop_thread
     global have_stop_thread
-    index = 1
+    global result_index
+    global result_poll_after_id
 
-    while (not stop_thread) and (not check_finish(log_dir, index, max_sample_nums)) and (not except_error()):
-        time.sleep(0.5)
-        new = check(index, log_dir)
-        if new:
-            try:
-                fig, alg, best_obj = plot_fig(index, log_dir, max_sample_nums)
-            except:
-                continue
-            display_plot(index - 1)
-            if alg is not None:
-                display_alg(alg)
-            objective_label['text'] = f'Current best objective:{best_obj}'
-            index += 1
+    result_poll_after_id = None
 
-    if not stop_thread:
-        right_frame_label['text'] = 'Finished'
-        # doc_button['state'] = tk.NORMAL
+    if stop_thread:
+        have_stop_thread = True
+        reset_run_buttons()
+        return
 
     if except_error():
         messagebox.showerror("Error", "Except Error. Please check the terminal.")
         right_frame_label['text'] = 'Error'
+        have_stop_thread = True
+        reset_run_buttons()
+        return
 
-    have_stop_thread = True
-    plot_button['state'] = tk.NORMAL
-    stop_button['state'] = tk.DISABLED
+    if check_finish(log_dir, result_index, result_max_sample_nums):
+        right_frame_label['text'] = 'Finished'
+        # doc_button['state'] = tk.NORMAL
+        have_stop_thread = True
+        reset_run_buttons()
+        return
+
+    if check(result_index, log_dir):
+        try:
+            _, alg, best_obj = plot_fig(result_index, log_dir, result_max_sample_nums)
+        except (FileNotFoundError, json.JSONDecodeError, IndexError):
+            pass
+        else:
+            display_plot(result_index - 1)
+            if alg is not None:
+                display_alg(alg)
+            objective_label['text'] = f'Current best objective:{best_obj}'
+            result_index += 1
+
+    result_poll_after_id = root.after(500, poll_results)
 
 def plot_fig(index, log_dir, max_sample_nums):
     global figures
@@ -646,7 +659,7 @@ def display_alg(alg):
 def except_error():
     global process1
     try:
-        if process1.exitcode == 1:
+        if process1.exitcode not in (None, 0):
             return True
         else:
             return False
@@ -671,33 +684,39 @@ def check(index, log_dir):
     return return_value
 
 
-def stop_run_thread():
-    thread_stop = threading.Thread(target=stop_run)
-    thread_stop.start()
+def reset_run_buttons():
+    plot_button['state'] = tk.NORMAL
+    stop_button['state'] = tk.DISABLED
 
 def stop_run():
     global stop_thread
     global process1
     global have_stop_thread
+    global result_poll_after_id
 
     # doc_button['state'] = tk.DISABLED
     stop_button['state'] = tk.DISABLED
     stop_thread = True
+    if result_poll_after_id is not None:
+        try:
+            root.after_cancel(result_poll_after_id)
+        except tk.TclError:
+            pass
+        result_poll_after_id = None
     if process1 is not None:
         if process1.is_alive():
             try:
                 process1.terminate()
+                process1.join(timeout=2)
             except:
                 pass
-    while (thread1 is not None) and (have_stop_thread is False):
-        time.sleep(0.5)
-        _ = 'stop'
-    plot_button['state'] = tk.NORMAL
+    have_stop_thread = True
+    reset_run_buttons()
 
 
 def exit_run():
     save_llm_settings()
-    stop_run_thread()
+    stop_run()
     root.destroy()
     sys.exit(0)
 
@@ -705,6 +724,7 @@ def exit_run():
 ###############################################################################
 
 if __name__ == '__main__':
+    multiprocessing.freeze_support()
 
     root = ttk.Window()
     root.title("Courier Delivery Solver")
@@ -816,7 +836,7 @@ if __name__ == '__main__':
     plot_button = ttk.Button(left_frame, text="Run", command=on_plot_button_click, width=12, bootstyle="primary-outline", state=tk.NORMAL)
     plot_button.pack(side='left', pady=20, expand=True)
 
-    stop_button = ttk.Button(left_frame, text="Stop", command=stop_run_thread, width=12, bootstyle="warning-outline", state=tk.DISABLED)
+    stop_button = ttk.Button(left_frame, text="Stop", command=stop_run, width=12, bootstyle="warning-outline", state=tk.DISABLED)
     stop_button.pack(side='left', pady=20, expand=True)
 
     doc_button = ttk.Button(left_frame, text="Log files", command=open_folder, width=12, bootstyle="dark-outline", state=tk.DISABLED)
