@@ -22,6 +22,7 @@ import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
 import sys
+import signal
 from pathlib import Path
 
 GUI_DIR = Path(__file__).resolve().parent
@@ -84,6 +85,14 @@ ax = None
 canvas = None
 
 ##########################################################
+
+def run_main_gui_process(llm_para, method_para, problem_para, profiler_para):
+    if hasattr(os, "setsid"):
+        try:
+            os.setsid()
+        except OSError:
+            pass
+    main_gui(llm_para, method_para, problem_para, profiler_para)
 
 class PlaceholderEntry(ttk.Entry):
     def __init__(self, master=None, placeholder="Enter text here", color='grey', bootstyle='default', width=30):
@@ -404,7 +413,10 @@ def on_plot_button_click():
         result_index = 1
         result_max_sample_nums = method_para['max_sample_nums']
 
-        process1 = PROCESS_CONTEXT.Process(target=main_gui, args=(llm_para, method_para, problem_para, profiler_para))
+        process1 = PROCESS_CONTEXT.Process(
+            target=run_main_gui_process,
+            args=(llm_para, method_para, problem_para, profiler_para)
+        )
         process1.start()
 
         result_poll_after_id = root.after(500, poll_results)
@@ -688,6 +700,36 @@ def reset_run_buttons():
     plot_button['state'] = tk.NORMAL
     stop_button['state'] = tk.DISABLED
 
+
+def terminate_search_process():
+    global process1
+
+    if process1 is None or not process1.is_alive():
+        return
+
+    if hasattr(os, "killpg"):
+        try:
+            process_group_id = os.getpgid(process1.pid)
+            if process_group_id != os.getpgrp():
+                os.killpg(process_group_id, signal.SIGTERM)
+                process1.join(timeout=2)
+                if process1.is_alive():
+                    os.killpg(process_group_id, signal.SIGKILL)
+                    process1.join(timeout=2)
+                return
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+
+    try:
+        process1.terminate()
+        process1.join(timeout=2)
+        if process1.is_alive():
+            process1.kill()
+            process1.join(timeout=2)
+    except:
+        pass
+
+
 def stop_run():
     global stop_thread
     global process1
@@ -703,13 +745,7 @@ def stop_run():
         except tk.TclError:
             pass
         result_poll_after_id = None
-    if process1 is not None:
-        if process1.is_alive():
-            try:
-                process1.terminate()
-                process1.join(timeout=2)
-            except:
-                pass
+    terminate_search_process()
     have_stop_thread = True
     reset_run_buttons()
 
