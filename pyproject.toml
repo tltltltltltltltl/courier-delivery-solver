@@ -8,7 +8,11 @@ version = "1.0.0"
 description = "外卖配送任务束分配求解与评测系统"
 requires-python = ">=3.9,<3.13"
 dependencies = [
+    "matplotlib>=3.9.4",
     "numpy<2",
+    "pytz>=2026.2",
+    "pyyaml>=6.0.3",
+    "ttkbootstrap>=1.18.2",
 ]
 
 [tool.setuptools.packages.find]
