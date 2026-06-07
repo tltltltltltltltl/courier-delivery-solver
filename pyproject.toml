@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "courier-delivery-solver"
+version = "1.0.0"
+description = "外卖配送任务束分配求解与评测系统"
+requires-python = ">=3.9,<3.13"
+dependencies = [
+    "numpy<2",
+]
+
+[tool.setuptools.packages.find]
+include = ["llm4ad*"]
+
+[tool.setuptools.package-data]
+"llm4ad.task.optimization.courier_bundle_assignment" = ["official_large_seed301.txt"]

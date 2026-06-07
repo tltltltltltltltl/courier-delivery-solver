@@ -1,0 +1,4 @@
+name: CourierBundleAssignmentEvaluation
+timeout_seconds: 10
+case_file: official_large_seed301.txt
+penalty_per_missed_task: 100.0
