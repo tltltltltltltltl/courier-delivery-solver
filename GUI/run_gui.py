@@ -26,6 +26,7 @@ from pathlib import Path
 
 GUI_DIR = Path(__file__).resolve().parent
 ROOT_DIR = GUI_DIR.parent
+LLM_SETTINGS_PATH = GUI_DIR / ".llm_settings.json"
 sys.path.insert(0, str(ROOT_DIR))
 
 import time
@@ -71,7 +72,7 @@ problem_para_value_name_list = []
 llm_para_entry_list = []
 llm_para_value_name_list = ['name', 'host', 'key', 'model']
 llm_para_default_value_list = ['HttpsApi', '', '', '']
-llm_para_placeholder_list = ['HttpsApi', 'api.example.com', 'sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'gpt-4o-mini']
+llm_para_placeholder_list = ['HttpsApi', 'api.example.com', 'your-api-key', 'gpt-4o-mini']
 
 default_method = 'eoh'
 default_problem = ['courier_bundle_assignment']
@@ -178,6 +179,49 @@ def open_folder():
             subprocess.run(['open', log_dir])
         else:
             subprocess.run(['xdg-open', log_dir])
+
+
+def _set_entry_value(entry, value):
+    entry.delete(0, 'end')
+    if value:
+        entry.configure(foreground=entry.default_fg_color)
+        entry.insert(0, str(value))
+        entry.have_content = True
+    else:
+        entry._add_placeholder(force=True)
+
+
+def load_llm_settings():
+    try:
+        with LLM_SETTINGS_PATH.open('r', encoding='utf-8') as file:
+            data = json.load(file)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {name: data.get(name, "") for name in llm_para_value_name_list}
+
+
+def apply_llm_settings():
+    settings = load_llm_settings()
+    for index, name in enumerate(llm_para_value_name_list):
+        value = settings.get(name)
+        if value is None or value == "":
+            value = llm_para_default_value_list[index] if index == 0 else ""
+        _set_entry_value(llm_para_entry_list[index], value)
+
+
+def save_llm_settings():
+    if len(llm_para_entry_list) != len(llm_para_value_name_list):
+        return
+    data = {}
+    for index, name in enumerate(llm_para_value_name_list):
+        entry = llm_para_entry_list[index]
+        data[name] = entry.get() if entry.have_content else ""
+    if not data.get("name"):
+        data["name"] = "HttpsApi"
+    with LLM_SETTINGS_PATH.open('w', encoding='utf-8') as file:
+        json.dump(data, file, ensure_ascii=False, indent=2)
 
 
 ##########################################################
@@ -348,6 +392,7 @@ def on_plot_button_click():
             messagebox.showinfo("Warning", "Please configure the settings of LLM.")
             return
 
+        save_llm_settings()
         llm_para, method_para, problem_para, profiler_para = return_para()
 
         init_fig(method_para['max_sample_nums'])
@@ -651,6 +696,7 @@ def stop_run():
 
 
 def exit_run():
+    save_llm_settings()
     stop_run_thread()
     root.destroy()
     sys.exit(0)
@@ -675,25 +721,13 @@ if __name__ == '__main__':
     style.configure("TLabel", font=('Comic Sans MS', 12))
     style.configure("TCombobox", font=('Comic Sans MS', 10))
 
-    photo_doc = tk.PhotoImage(file=str(GUI_DIR / "image" / "document.png"))
-    photoimage_doc = photo_doc.subsample(10, 10)
-    photo_web = tk.PhotoImage(file=str(GUI_DIR / "image" / "website.png"))
-    photoimage_web = photo_web.subsample(10, 10)
     photo_git = tk.PhotoImage(file=str(GUI_DIR / "image" / "github.png"))
     photoimage_git = photo_git.subsample(10, 10)
-    photo_qq = tk.PhotoImage(file=str(GUI_DIR / "image" / "qq.png"))
-    photoimage_qq = photo_qq.subsample(10, 10)
 
     top_frame = ttk.Frame(root, height=30, bootstyle="info")
     top_frame.pack(fill='x')
-    link_doc = ttk.Button(top_frame, image=photoimage_doc, command=open_doc_link, bootstyle="info")
-    link_doc.pack(side=tk.LEFT, padx=3)
     link_git = ttk.Button(top_frame, image=photoimage_git, command=open_github_link, bootstyle="info")
     link_git.pack(side=tk.LEFT, padx=3)
-    link_web = ttk.Button(top_frame, image=photoimage_web, command=open_website_link, bootstyle="info")
-    link_web.pack(side=tk.LEFT, padx=3)
-    link_qq = ttk.Button(top_frame, image=photoimage_qq, command=open_qq_link, bootstyle="info")
-    link_qq.pack(side=tk.LEFT, padx=3)
 
     bottom_frame = ttk.Frame(root)
     bottom_frame.pack(fill='both', expand=True)
@@ -723,16 +757,7 @@ if __name__ == '__main__':
     llm_frame.grid_columnconfigure(0, weight=1)
     llm_frame.grid_columnconfigure(1, weight=1)
 
-    with_default_parameter = False
-    if with_default_parameter:
-        for i in range(len(llm_para_value_name_list)):
-            llm_para_entry_list[i].delete(0, 'end')
-            llm_para_entry_list[i].configure(foreground=llm_para_entry_list[i].default_fg_color)
-            llm_para_entry_list[i].insert(0, str(llm_para_default_value_list[i]))
-    else:
-        llm_para_entry_list[0].delete(0, 'end')
-        llm_para_entry_list[0].configure(foreground=llm_para_entry_list[0].default_fg_color)
-        llm_para_entry_list[0].insert(0, str(llm_para_default_value_list[0]))
+    apply_llm_settings()
 
     ############
 

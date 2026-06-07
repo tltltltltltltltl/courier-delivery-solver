@@ -24,5 +24,6 @@ llm4ad.egg-info/PKG-INFO
 llm4ad.egg-info/dependency_links.txt
 
 .env
+GUI/.llm_settings.json
 #LLaMEA logs content in this directory.
 **/exp-*
